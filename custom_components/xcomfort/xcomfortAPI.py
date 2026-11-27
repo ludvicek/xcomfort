@@ -20,6 +20,44 @@ POWERED_MAINS_ID = '6'
 BATTERY_STATUS_ID = 'batteries'
 
 
+# The zone setting that reads every zone of the controller, not just one.
+ALL_ZONES = 'all'
+
+# How often the zone list, the zones' members and the scenes are read again, in
+# minutes. They change only when the installation is reconfigured.
+ZONE_REFRESH_MINUTES = 5
+
+
+def _valid(items, key):
+    """The entries of an SHC list reply that carry key; [] for anything else.
+
+    query() falls back to [{}] when the SHC sends no result, which is what an
+    unreachable controller and an empty zone both produce.
+    """
+    if not isinstance(items, list):
+        return []
+    return [item for item in items if isinstance(item, dict) and item.get(key)]
+
+
+def _poll_cover(members):
+    """The fewest zones whose devices together cover every device, greedily.
+
+    Zones overlap: a light is often in its room and in a "Lights" zone too. The
+    values are the same in every zone, so polling a covering set is enough.
+    members maps zone id -> set of device ids, in the controller's zone order.
+    """
+    uncovered = set().union(*members.values()) if members else set()
+    chosen = []
+    while uncovered:
+        zone_id = max(members, key=lambda z: len(members[z] & uncovered))
+        gain = members[zone_id] & uncovered
+        if not gain:
+            break
+        chosen.append(zone_id)
+        uncovered -= gain
+    return chosen
+
+
 def _succeeded(result):
     """True if a controlDevice/triggerScene/set* reply reports status 'ok'.
 
@@ -33,12 +71,19 @@ class xcomfortAPI:
     def __init__(self, session: aiohttp.ClientSession ,url, zone, username, password, stat_interval):
         self.sessionID = ''
         self.session = session
+        # device id -> the device as the SHC reports it, plus 'zone' (the zone
+        # it is shown and switched in) and 'zones' (every zone it is in)
         self.devices = {}
+        # scene id -> the scene, plus the 'zone' it is triggered in
         self.scenes = {}
+        # zone id -> {'id', 'name'}, for the zones this entry reads
+        self.zones = {}
+        self.poll_zones = []
+        self.zone_counter = 0
         self.log_stats = {}
         self.physical_devices = {}
         self.system_states = {}
-        self.zones_list = {}
+        self.zones_list = []
         self.heating_zones = []
         self.heating_status = {}
         self.username = username
@@ -128,12 +173,87 @@ class xcomfortAPI:
         self.stat_scan_now = True
         _LOGGER.debug("add_heating_zone zone=%s",zone)
 
+    async def refresh_zones(self):
+        """Read the zones, the devices and scenes in each, and pick the zones to poll.
+
+        Returns False and keeps what was read before when the controller sends
+        no zones or no devices at all.
+        """
+        zone_list = _valid(await self.query('HFM/getZones', params=['']), 'zoneId')
+        if zone_list:
+            self.zones_list = zone_list
+        if self.zone == ALL_ZONES:
+            wanted = [zone['zoneId'] for zone in zone_list]
+        else:
+            wanted = [self.zone]
+        names = {zone['zoneId']: zone.get('zoneName') or zone['zoneId'] for zone in zone_list}
+
+        zones, devices, scenes, members = {}, {}, {}, {}
+        for zone_id in wanted:
+            zone_devices = _valid(await self.query(
+                'StatusControlFunction/getDevices', params=[zone_id, '']), 'id')
+            zone_scenes = _valid(await self.query(
+                'SceneFunction/getScenes', params=[zone_id, '']), 'id')
+            if not zone_devices and not zone_scenes:
+                continue
+            zones[zone_id] = {'id': zone_id, 'name': names.get(zone_id, zone_id)}
+            members[zone_id] = {device['id'] for device in zone_devices}
+            for device in zone_devices:
+                devices.setdefault(device['id'], dict(device))
+            for scene in zone_scenes:
+                scenes.setdefault(scene['id'], {**scene, 'zone': zone_id})
+        if not devices:
+            return False
+
+        # A device's zone is the smallest zone it is in. Installers put the same
+        # light into its room and into a zone such as "Lights", and the room is
+        # the smaller of the two. Ties go to the controller's own zone order.
+        order = list(members)
+        for device_id, device in devices.items():
+            in_zones = [zone_id for zone_id in order if device_id in members[zone_id]]
+            device['zones'] = in_zones
+            device['zone'] = min(in_zones, key=lambda z: (len(members[z]), order.index(z)))
+
+        self.zones, self.devices, self.scenes = zones, devices, scenes
+        self.poll_zones = _poll_cover({z: m for z, m in members.items() if m})
+        _LOGGER.debug("refresh_zones() %d zones, %d devices, %d scenes, polling %s",
+                      len(zones), len(devices), len(scenes), self.poll_zones)
+        return True
+
+    async def poll_devices(self):
+        """Update the known devices' values. False if any polled zone fails."""
+        ok = True
+        seen = set()
+        for zone_id in self.poll_zones:
+            zone_devices = _valid(await self.query(
+                'StatusControlFunction/getDevices', params=[zone_id, '']), 'id')
+            if not zone_devices:
+                ok = False
+                continue
+            for device in zone_devices:
+                # A device in two polled zones is taken from the first only, so a
+                # value that changes between the two requests cannot flip back.
+                if device['id'] in seen:
+                    continue
+                seen.add(device['id'])
+                known = self.devices.get(device['id'])
+                if known is None:
+                    # New on the controller: read the zones again next time.
+                    self.zone_counter = 0
+                    continue
+                known.update(device)
+        return ok
+
     async def get_statuses(self):
+        """Read the controller's state. False when it sent no usable device data."""
         _LOGGER.debug("get_statuses() counter=%d, stat_interval=%d",self.update_counter,self.stat_interval)
-        self.devices = await self.query('StatusControlFunction/getDevices', params=[self.zone, ''])
-        self.scenes = await self.query('SceneFunction/getScenes', params=[self.zone, ''])
-        #_LOGGER.debug("get_statuses() self.devices=%s", self.devices)
-        #_LOGGER.debug("get_statuses() self.scenes=%s", self.scenes)
+        if self.zone_counter <= 0 or not self.devices:
+            ok = await self.refresh_zones()
+            if ok:
+                self.zone_counter = self.stat_interval * ZONE_REFRESH_MINUTES
+        else:
+            ok = await self.poll_devices()
+        self.zone_counter -= 1
         if (self.update_counter <= 0) or self.stat_scan_now:
             _LOGGER.debug("get_statuses() update_counter <= 0")
             self.update_counter = self.stat_interval
@@ -160,7 +280,7 @@ class xcomfortAPI:
                 #_LOGGER.debug("get_statuses() x=%s", x)
                 self.heating_status.update(x)
         self.update_counter -=1
-        return True
+        return ok
 
     def get_battery_devices(self):
         """The physical devices that run on a battery, keyed on their uid.
@@ -190,15 +310,24 @@ class xcomfortAPI:
         self.zones_list = await self.query('HFM/getZones', params=[''])
         return True
 
+    def _zone_of(self, items, item_id):
+        """The zone to address an item in: its own, else the configured one."""
+        zone_id = (items.get(item_id) or {}).get('zone')
+        if zone_id:
+            return zone_id
+        return '' if self.zone == ALL_ZONES else self.zone
+
     async def switch(self, dev_id, state):
-        result = await self.query('StatusControlFunction/controlDevice', params=[self.zone, dev_id, state])
+        result = await self.query('StatusControlFunction/controlDevice',
+                                  params=[self._zone_of(self.devices, dev_id), dev_id, state])
         if not _succeeded(result):
             return False
         else:
             return True
 
     async def scene(self, scene_id):
-        result = await self.query('SceneFunction/triggerScene', params=[self.zone, scene_id])
+        result = await self.query('SceneFunction/triggerScene',
+                                  params=[self._zone_of(self.scenes, scene_id), scene_id])
         if not _succeeded(result):
             return False
         else:
@@ -265,4 +394,19 @@ class xcomfortAPI:
         async with aiofiles.open("xcomfort_log_stats" + suffix, "w") as file:
             await file.write(json.dumps(self.log_stats, indent=4))
         async with aiofiles.open("xcomfort_physical_devices" + suffix, "w") as file:
-            await file.write(json.dumps(self.physical_devices, indent=4))   
+            await file.write(json.dumps(self.physical_devices, indent=4))
+        # Every zone the controller knows, with the devices and scenes in each,
+        # so a report shows the whole installation, not only the configured zone.
+        zones = await self.query('HFM/getZones', params=[''])
+        per_zone = {}
+        for zone in zones if isinstance(zones, list) else []:
+            zone_id = zone.get('zoneId') if isinstance(zone, dict) else None
+            if not zone_id:
+                continue
+            per_zone[zone_id] = {
+                'zone': zone,
+                'devices': await self.query('StatusControlFunction/getDevices', params=[zone_id, '']),
+                'scenes': await self.query('SceneFunction/getScenes', params=[zone_id, '']),
+            }
+        async with aiofiles.open("xcomfort_zones" + suffix, "w") as file:
+            await file.write(json.dumps({'zones': zones, 'per_zone': per_zone}, indent=4))   

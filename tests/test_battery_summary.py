@@ -3,7 +3,7 @@ import asyncio
 import importlib
 import types
 
-from conftest import FakeEntityRegistry, registry_entry
+from conftest import FakeEntityRegistry, fake_coordinator, fake_entry, registry_entry
 
 from xcomfort import sensor
 from xcomfort.const import LEGACY_BATTERY_SUMMARY_ID, battery_summary_unique_id
@@ -21,9 +21,8 @@ class FakeXC:
 
 
 def make_entry(entry_id, unique_id):
-    coordinator = types.SimpleNamespace(xc=FakeXC(), data=[], last_update_success=True)
-    return types.SimpleNamespace(entry_id=entry_id, unique_id=unique_id,
-                                 runtime_data=coordinator)
+    return fake_entry(entry_id=entry_id, unique_id=unique_id,
+                      runtime_data=fake_coordinator(FakeXC()))
 
 
 def summary_of(entry):

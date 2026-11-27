@@ -7,7 +7,7 @@
           "url": "URL of SHC device",
           "username": "Login username",
           "password": "Login password",
-          "zone": "Zone",
+          "zone": "Zone (all, or one zone id such as hz_1)",
           "scan_interval": "Refrash interval (s)",
           "heating_zone0": "Heating Zone 0",
           "heating_zone0_radiator": "Haating Zone 0 RM",
@@ -25,6 +25,14 @@
           "heating_zone_radiator": "Haating Zone 6 radiator"
         }
       },
+      "reconfigure": {
+        "title": "Reconfigure the xComfort SHC",
+        "description": "Which zones to read and how often. \"all\" reads every zone of the controller.",
+        "data": {
+          "zone": "Zone (all, or one zone id such as hz_1)",
+          "scan_interval": "Refresh interval (s)"
+        }
+      },
       "reauth_confirm": {
         "title": "Reauthenticate with the xComfort SHC",
         "description": "The SHC rejected the stored password for {username}. Enter the current password.",
@@ -38,7 +46,8 @@
       "cannot_connect": "Failed to connect to the SHC"
     },
     "abort": {
-      "reauth_successful": "Reauthentication was successful"
+      "reauth_successful": "Reauthentication was successful",
+      "reconfigure_successful": "The SHC was reconfigured"
     }
   }
 }

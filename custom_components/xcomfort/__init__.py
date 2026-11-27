@@ -7,12 +7,14 @@ from datetime import timedelta
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 
 #from xcomfortshc import xcomfortAPI
 from .xcomfortAPI import xcomfortAPI
 
 from .const import DOMAIN, LEGACY_BATTERY_SUMMARY_ID, battery_summary_unique_id
+from .entity import entry_key, hub_device_info
 _LOGGER = logging.getLogger(__name__)
 
 PLATFORMS = ["sensor", "binary_sensor", "light", "switch", "button", "cover", "climate"]
@@ -54,8 +56,34 @@ async def async_setup_entry(hass, config_entry):
     config_entry.runtime_data = coordinator
 
     _migrate_battery_summary(hass, config_entry)
+    _migrate_unique_ids(hass, config_entry)
+    # The controller is the parent device of its zones; it has to exist
+    # before the zone devices name it as their via_device.
+    dr.async_get(hass).async_get_or_create(config_entry_id=config_entry.entry_id,
+                                           **hub_device_info(config_entry))
     await hass.config_entries.async_forward_entry_setups(config_entry, PLATFORMS)
     return True
+
+def _migrate_unique_ids(hass, config_entry):
+    """Prefix the entry's unique ids with its controller key.
+
+    Unique ids used to be the SHC's own ids, which repeat between controllers
+    (virtual markers, scenes), so with several SHCs only one of each was kept.
+    Renaming in place keeps every entity's entity_id, history and settings.
+    """
+    registry = er.async_get(hass)
+    prefix = entry_key(config_entry) + "_"
+    keep = battery_summary_unique_id(config_entry)
+    for entity in er.async_entries_for_config_entry(registry, config_entry.entry_id):
+        old = entity.unique_id
+        if old.startswith(prefix) or old == keep:
+            continue
+        new = prefix + old
+        if registry.async_get_entity_id(entity.domain, DOMAIN, new):
+            _LOGGER.warning("Not migrating %s: unique_id %s is already taken", entity.entity_id, new)
+            continue
+        _LOGGER.debug("Migrating %s unique_id %s -> %s", entity.entity_id, old, new)
+        registry.async_update_entity(entity.entity_id, new_unique_id=new)
 
 def _migrate_battery_summary(hass, config_entry):
     """Move the entry's battery summary to its own unique id.
@@ -91,16 +119,16 @@ class XCDataUpdateCoordinator(DataUpdateCoordinator):
 
     async def _async_update_data(self):
         try:
-            await self.xc.get_statuses()
+            ok = await self.xc.get_statuses()
         except ConfigEntryAuthFailed:
             raise
         except Exception as err:
             raise UpdateFailed(f"Error talking to the xComfort SHC: {err}") from err
-        # query() falls back to [{}] when the SHC cannot be reached, which is
-        # truthy, so the emptiness has to be checked one level down as well.
-        # Without this the coordinator reports success on a connection error and
-        # every entity reads None while still claiming to be available.
-        if not self.xc.devices or not self.xc.devices[0]:
+        # query() falls back to [{}] when the SHC cannot be reached, and the API
+        # reports that as ok=False rather than as an empty success. Without this
+        # check the coordinator reported success on a connection error and every
+        # entity read None while still claiming to be available.
+        if not ok or not self.xc.devices:
             # The same [{}] comes back for a zone that holds no devices, so the
             # two cannot be told apart here; the message names both.
             raise UpdateFailed(

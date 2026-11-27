@@ -5,6 +5,8 @@ from homeassistant.components.binary_sensor import (
 )
 import logging
 
+from .entity import XComfortEntity, add_entities_dynamically, device_items
+
 _LOGGER = logging.getLogger(__name__)
 
 # The SHC reports these device types as plain strings in the "value" field.
@@ -16,20 +18,23 @@ OFF_STATES = ("OFF", "CLOSE", "CLOSED", "NO MOTION")
 
 async def async_setup_entry(hass, config_entry, async_add_entities):
     coordinator = config_entry.runtime_data
-    i = 0
-    for device in coordinator.data:
+
+    def build(device):
         if device['type'].find("BinaryMotionSensor") >= 0:
-            async_add_entities([xcBinarySensor(coordinator, i, device['id'], device['name'],
-                                               BinarySensorDeviceClass.MOTION)])
-        elif device['type'].find("BinaryInput") >= 0:
+            return [xcBinarySensor(coordinator, device['id'], device['id'], device['name'],
+                                   BinarySensorDeviceClass.MOTION)]
+        if device['type'].find("BinaryInput") >= 0:
             # A binary input can be wired to a door contact, a window contact or
             # anything else, and the SHC does not say which, so it gets no device
             # class and the user can assign one in Home Assistant.
-            async_add_entities([xcBinarySensor(coordinator, i, device['id'], device['name'], None)])
-        i += 1
+            return [xcBinarySensor(coordinator, device['id'], device['id'], device['name'], None)]
+        return []
+
+    add_entities_dynamically(config_entry, coordinator, async_add_entities,
+                             device_items(coordinator), build)
 
 
-class xcBinarySensor(BinarySensorEntity):
+class xcBinarySensor(XComfortEntity, BinarySensorEntity):
 
     def __init__(self, coordinator, id, unique_name, name, device_class):
         self.id = id
@@ -44,10 +49,6 @@ class xcBinarySensor(BinarySensorEntity):
     @property
     def name(self):
         return self._name
-
-    @property
-    def unique_id(self):
-        return self._unique_id
 
     @property
     def device_class(self):

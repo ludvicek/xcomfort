@@ -10,7 +10,7 @@ import importlib
 import types
 
 import pytest
-from conftest import FakeEntityRegistry
+from conftest import FakeDeviceRegistry, FakeEntityRegistry, fake_coordinator, fake_entry
 
 from xcomfort import binary_sensor, button, climate, cover, light, sensor, switch
 from xcomfort.const import DOMAIN
@@ -23,6 +23,7 @@ class FakeXC:
         self.url = url
         self.scenes = [{"id": "scene1", "name": "Scene"}]
         self.zones_list = []
+        self.zones = {}
         self.zones_requested = False
 
     def get_battery_devices(self):
@@ -46,10 +47,9 @@ DEVICES = [
 
 
 def make_entry(url):
-    coordinator = types.SimpleNamespace(xc=FakeXC(url), data=list(DEVICES),
-                                        last_update_success=True)
-    entry = types.SimpleNamespace(entry_id=url, data={"url": url, "heating_zone0": ""},
-                                  runtime_data=coordinator)
+    coordinator = fake_coordinator(FakeXC(url), DEVICES)
+    entry = fake_entry(entry_id=url, unique_id=url, runtime_data=coordinator,
+                       data={"url": url, "heating_zone0": ""})
     return entry, coordinator
 
 
@@ -114,16 +114,14 @@ class FakeServices:
 def make_hass(entity_registry=None):
     return types.SimpleNamespace(data={}, config_entries=FakeConfigEntries(),
                                  services=FakeServices(),
-                                 entity_registry=entity_registry or FakeEntityRegistry())
+                                 entity_registry=entity_registry or FakeEntityRegistry(),
+                                 device_registry=FakeDeviceRegistry())
 
 
 def make_config_entry(url):
-    return types.SimpleNamespace(
-        entry_id=url,
-        unique_id=url,
-        data={"url": url, "zone": "hz_1", "username": "user", "password": "pw",
-              "scan_interval": 5},
-    )
+    return fake_entry(entry_id=url, unique_id=url, title=url,
+                      data={"url": url, "zone": "hz_1", "username": "user", "password": "pw",
+                            "scan_interval": 5})
 
 
 @pytest.fixture
@@ -132,7 +130,7 @@ def no_network(monkeypatch):
         self.is_connected = True
 
     async def get_statuses(self):
-        self.devices = list(DEVICES)
+        self.devices = {device["id"]: device for device in DEVICES}
         return True
 
     monkeypatch.setattr(integration.xcomfortAPI, "connect", connect)
@@ -144,14 +142,14 @@ def no_network(monkeypatch):
 ConfigEntryNotReady = importlib.import_module("homeassistant.exceptions").ConfigEntryNotReady
 
 
-@pytest.mark.parametrize("devices", [
-    [{}],   # query() fallback: SHC unreachable, or a zone without devices
-    [],
+@pytest.mark.parametrize("ok", [
+    False,  # the API saw only the [{}] fallback: SHC unreachable or zone empty
+    True,   # defensive: a success that still left no devices
 ])
-def test_no_devices_at_setup_means_not_ready(no_network, monkeypatch, devices):
+def test_no_devices_at_setup_means_not_ready(no_network, monkeypatch, ok):
     async def get_statuses(self):
-        self.devices = devices
-        return True
+        self.devices = {}
+        return ok
 
     monkeypatch.setattr(integration.xcomfortAPI, "get_statuses", get_statuses)
     hass = make_hass()
@@ -178,7 +176,7 @@ def test_unreachable_controller_at_connect_means_not_ready(monkeypatch):
 def test_first_refresh_data_is_there_before_platforms(no_network):
     hass = make_hass()
     (entry,) = setup_entries(hass, "http://shc-a")
-    assert entry.runtime_data.data == DEVICES
+    assert entry.runtime_data.data == {device["id"]: device for device in DEVICES}
     assert hass.config_entries.forwarded == ["http://shc-a"]
 
 

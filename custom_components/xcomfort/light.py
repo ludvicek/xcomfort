@@ -3,20 +3,23 @@ from homeassistant.components.light import (ATTR_BRIGHTNESS, LightEntity, ColorM
 
 import logging
 
+from .entity import XComfortEntity, add_entities_dynamically, device_items
+
 _LOGGER = logging.getLogger(__name__)
 
 async def async_setup_entry(hass, config_entry, async_add_entities):
     coordinator = config_entry.runtime_data
-    i = 0
-    for device in coordinator.data:
-        if device['type'].find("DimAct") >= 0:
-            async_add_entities([xcLight(coordinator, i, device['id'], device['name'], device['type'])])
-        if device['type'].find("LightAct") >= 0:
-            async_add_entities([xcLight(coordinator, i, device['id'], device['name'], device['type'])])
-        i += 1
+
+    def build(device):
+        if device['type'].find("DimAct") >= 0 or device['type'].find("LightAct") >= 0:
+            return [xcLight(coordinator, device['id'], device['id'], device['name'], device['type'])]
+        return []
+
+    add_entities_dynamically(config_entry, coordinator, async_add_entities,
+                             device_items(coordinator), build)
 
 
-class xcLight(LightEntity):
+class xcLight(XComfortEntity, LightEntity):
     def __init__(self, coordinator, id, unique_name, name, type ):
         self.id = id
         self._name = name
@@ -59,10 +62,6 @@ class xcLight(LightEntity):
     @property
     def brightness(self):
         return int(255 * float(self.coordinator.data[self.id]['value']) /100 )
-
-    @property
-    def unique_id(self):
-        return self._unique_id
 
     @property
     def extra_state_attributes(self):

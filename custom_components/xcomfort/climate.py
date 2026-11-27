@@ -13,10 +13,20 @@ from homeassistant.const import (
 )
 
 
+from .entity import XComfortEntity
+
 _LOGGER = logging.getLogger(__name__)
 
 async def async_setup_entry(hass, config_entry, async_add_entities):
     coordinator = config_entry.runtime_data
+    add_entities = async_add_entities
+
+    def async_add_entities(entities):
+        # A thermostat belongs to its heating zone's device, under the controller.
+        add_entities([entity.bind(config_entry, coordinator.xc.zones.get(entity._heating_zone),
+                                  raw_id='climate' + entity.id)
+                      for entity in entities])
+
     await coordinator.xc.get_zones()
     try:
         if config_entry.data["heating_zone0"]!='':
@@ -74,7 +84,7 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
     except:
         pass
 
-class xcThermostat(CoordinatorEntity, ClimateEntity):
+class xcThermostat(XComfortEntity, CoordinatorEntity, ClimateEntity):
     _attr_target_temperature_step = PRECISION_HALVES
     _attr_hvac_mode= None
     _attr_hvac_modes = [HVACMode.HEAT, HVACMode.OFF]
@@ -134,13 +144,13 @@ class xcThermostat(CoordinatorEntity, ClimateEntity):
     def _update_attr(self) -> None:
         if self._rm:
             try:
-                dev = next(x for x in self.coordinator.data if x['id']=='xCo:'+self.id+'_u12')
+                dev = self.coordinator.data['xCo:'+self.id+'_u12']
                 self._attr_current_temperature = float(dev['value'])
             except:
                 self._attr_current_temperature = None
         else:
             try:
-                dev = next(x for x in self.coordinator.data if x['id']=='xCo:'+self.id+'_u0')
+                dev = self.coordinator.data['xCo:'+self.id+'_u0']
                 self._attr_current_temperature = float(dev['value'])
             except:
                 self._attr_current_temperature = None

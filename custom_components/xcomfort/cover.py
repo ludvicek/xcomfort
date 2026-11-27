@@ -6,17 +6,22 @@ from homeassistant.components.cover import (
 
 import logging
 
+from .entity import XComfortEntity, add_entities_dynamically, device_items
+
 _LOGGER = logging.getLogger(__name__)
 
 async def async_setup_entry(hass, config_entry, async_add_entities):
     coordinator = config_entry.runtime_data
-    i = 0
-    for device in coordinator.data:
-        if device['type'].find("Shutt") >= 0:
-            async_add_entities([xcShutter(coordinator, i, device['id'], device['name'])])
-        i += 1
 
-class xcShutter(CoverEntity):
+    def build(device):
+        if device['type'].find("Shutt") >= 0:
+            return [xcShutter(coordinator, device['id'], device['id'], device['name'])]
+        return []
+
+    add_entities_dynamically(config_entry, coordinator, async_add_entities,
+                             device_items(coordinator), build)
+
+class xcShutter(XComfortEntity, CoverEntity):
 
     _attr_supported_features = (
         CoverEntityFeature.CLOSE |
@@ -55,10 +60,6 @@ class xcShutter(CoverEntity):
     @property
     def assumed_state(self):
         return True
-
-    @property
-    def unique_id(self):
-        return self._unique_id
 
     @property
     def extra_state_attributes(self):

@@ -129,7 +129,44 @@ _ensure("homeassistant.const", PERCENTAGE="%", ATTR_TEMPERATURE="temperature",
 _ensure("homeassistant.helpers")
 _ensure("homeassistant.helpers.entity", EntityCategory=_Names())
 _ensure("homeassistant.helpers.aiohttp_client", async_get_clientsession=lambda hass: None)
-_ensure("homeassistant.helpers.entity_registry", async_get=lambda hass: hass.entity_registry)
+_ensure("homeassistant.helpers.entity_registry", async_get=lambda hass: hass.entity_registry,
+        async_entries_for_config_entry=lambda registry, entry_id: [
+            entry for entry in registry.entities.values() if entry.config_entry_id == entry_id])
+_ensure("homeassistant.helpers.device_registry", async_get=lambda hass: hass.device_registry)
+
+
+def fake_entry(entry_id="entry-a", unique_id="http://shc-a", runtime_data=None, title="SHC",
+               data=None):
+    """A config entry with what the platforms touch."""
+    unloads = []
+    return types.SimpleNamespace(entry_id=entry_id, unique_id=unique_id, title=title,
+                                 data=data if data is not None else {"url": unique_id},
+                                 runtime_data=runtime_data, async_on_unload=unloads.append,
+                                 unloads=unloads)
+
+
+def fake_coordinator(xc, devices=()):
+    """A coordinator holding devices keyed by id, with working listeners."""
+    listeners = []
+
+    def add_listener(callback):
+        listeners.append(callback)
+        return lambda: listeners.remove(callback)
+
+    if not hasattr(xc, "zones"):
+        xc.zones = {}
+    return types.SimpleNamespace(xc=xc, data={device["id"]: device for device in devices},
+                                 last_update_success=True, async_add_listener=add_listener,
+                                 listeners=listeners)
+
+
+class FakeDeviceRegistry:
+    def __init__(self):
+        self.devices = []
+
+    def async_get_or_create(self, **kwargs):
+        self.devices.append(kwargs)
+        return kwargs
 
 
 class FakeEntityRegistry:

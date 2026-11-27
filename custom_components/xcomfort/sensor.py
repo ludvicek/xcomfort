@@ -14,6 +14,7 @@ from homeassistant.helpers.entity import EntityCategory
 import logging
 
 from .const import battery_summary_unique_id
+from .entity import XComfortEntity, add_entities_dynamically, device_items
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -45,33 +46,39 @@ SENSOR_TYPES = {
 
 async def async_setup_entry(hass, config_entry, async_add_entities):
     coordinator = config_entry.runtime_data
-    i = 0
-    for device in coordinator.data:
+
+    def build(device):
         if device['type'].find("Temp") >= 0:
             # The channel suffix is kept. A room thermostat exposes both a
             # TemperatureSensor "(temperature)" and a WheelSensor "(adjustment)"
             # under one device name, so stripping it off the reading left the two
             # entities telling apart only by the wheel having a suffix. The SHC
             # emits both suffixes in English whatever its display language.
-            async_add_entities([xcTemperature(coordinator, i, device['id'],
-                                              clean(device['name']) or device['id'])])
-        else:
-            for type_name, config in SENSOR_TYPES.items():
-                if device['type'].find(type_name) >= 0:
-                    async_add_entities([xcSensor(coordinator, i, device['id'],
-                                                 clean(device['name']) or device['id'],
-                                                 *config)])
-                    break
-        i += 1
+            return [xcTemperature(coordinator, device['id'], device['id'],
+                                  clean(device['name']) or device['id'])]
+        for type_name, config in SENSOR_TYPES.items():
+            if device['type'].find(type_name) >= 0:
+                return [xcSensor(coordinator, device['id'], device['id'],
+                                 clean(device['name']) or device['id'], *config)]
+        return []
+
+    add_entities_dynamically(config_entry, coordinator, async_add_entities,
+                             device_items(coordinator), build)
+
     # Battery and signal state belong to the physical unit, not to the
     # datapoints it exposes, so these come from the diagnostics call rather
-    # than from the zone's device list.
-    for uid, device in coordinator.xc.get_battery_devices().items():
-        async_add_entities([xcBattery(coordinator, uid, device['name'])])
-    if coordinator.xc.get_battery_status():
-        async_add_entities([xcBatteryStatus(coordinator, battery_summary_unique_id(config_entry))])
+    # than from the zone's device list. They hang off the controller's device.
+    def battery_items():
+        for uid, device in coordinator.xc.get_battery_devices().items():
+            yield uid, None, (uid, device)
 
-class xcTemperature(SensorEntity):
+    add_entities_dynamically(config_entry, coordinator, async_add_entities, battery_items,
+                             lambda item: [xcBattery(coordinator, item[0], item[1]['name'])])
+    if coordinator.xc.get_battery_status():
+        async_add_entities([xcBatteryStatus(coordinator, battery_summary_unique_id(config_entry))
+                            .bind(config_entry, unique_id=battery_summary_unique_id(config_entry))])
+
+class xcTemperature(XComfortEntity, SensorEntity):
 
     _attr_device_class = SensorDeviceClass.TEMPERATURE
     _attr_state_class = SensorStateClass.MEASUREMENT
@@ -100,10 +107,6 @@ class xcTemperature(SensorEntity):
     def available(self):
         """Return if entity is available."""
         return self.coordinator.last_update_success
-
-    @property
-    def unique_id(self):
-        return self._unique_id
 
     @property
     def native_value(self):
@@ -145,7 +148,7 @@ class xcTemperature(SensorEntity):
     #    await self.coordinator.async_request_refresh()
 
 
-class xcSensor(SensorEntity):
+class xcSensor(XComfortEntity, SensorEntity):
     """A read-only numeric device the SHC exposes as a plain value."""
 
     def __init__(self, coordinator, id, unique_name, name, device_class, state_class,
@@ -166,10 +169,6 @@ class xcSensor(SensorEntity):
     @property
     def name(self):
         return self._name
-
-    @property
-    def unique_id(self):
-        return self._unique_id
 
     @property
     def should_poll(self):
@@ -203,7 +202,7 @@ class xcSensor(SensorEntity):
         self.async_on_remove(self.coordinator.async_add_listener(self.async_write_ha_state))
 
 
-class xcBattery(SensorEntity):
+class xcBattery(XComfortEntity, SensorEntity):
     """Battery state of one battery powered device, as reported by the SHC.
 
     The controller only reports a coarse level as text, the same one its web
@@ -224,10 +223,6 @@ class xcBattery(SensorEntity):
     @property
     def name(self):
         return self._name
-
-    @property
-    def unique_id(self):
-        return self._unique_id
 
     @property
     def should_poll(self):
@@ -265,7 +260,7 @@ class xcBattery(SensorEntity):
         self.async_on_remove(self.coordinator.async_add_listener(self.async_write_ha_state))
 
 
-class xcBatteryStatus(SensorEntity):
+class xcBatteryStatus(XComfortEntity, SensorEntity):
     """The controller's battery summary for the whole installation."""
 
     _attr_entity_category = EntityCategory.DIAGNOSTIC
@@ -279,10 +274,6 @@ class xcBatteryStatus(SensorEntity):
     @property
     def name(self):
         return self._name
-
-    @property
-    def unique_id(self):
-        return self._unique_id
 
     @property
     def should_poll(self):

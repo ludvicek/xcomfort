@@ -6,6 +6,7 @@ import voluptuous as vol
 import logging
 
 from .const import DOMAIN
+from .xcomfortAPI import ALL_ZONES
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -14,7 +15,7 @@ DATA_SCHEMA = vol.Schema(
         vol.Required("url", default="http://10.0.0.20"): str,
         vol.Required("username", default="admin1"): str,
         vol.Required("password",default=""): str,
-        vol.Required("zone",default="hz_3"): str,
+        vol.Required("zone",default=ALL_ZONES): str,
         vol.Required("scan_interval", default=5): int,
         vol.Optional("heating_zone0",default=""): str,
         vol.Optional("heating_zone0_radiator",default=""): str,
@@ -57,6 +58,20 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return self.async_show_form(
             step_id="user", data_schema=DATA_SCHEMA, errors=errors,
         )
+
+    async def async_step_reconfigure(self, user_input=None):
+        """Change the zone and the refresh interval without removing the entry."""
+        entry = self._get_reconfigure_entry()
+        if user_input is not None:
+            return self.async_update_reload_and_abort(entry, data_updates=user_input)
+        schema = vol.Schema(
+            {
+                vol.Required("zone", default=entry.data.get("zone", ALL_ZONES)): str,
+                vol.Required("scan_interval", default=entry.data.get("scan_interval", 5)):
+                    vol.All(int, vol.Range(min=1)),
+            }
+        )
+        return self.async_show_form(step_id="reconfigure", data_schema=schema)
 
     async def _async_check_credentials(self, url, username, password):
         """Return an error key if the SHC rejects these credentials, else None."""

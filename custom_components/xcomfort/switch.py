@@ -2,17 +2,22 @@
 from homeassistant.components.switch import SwitchEntity
 import logging
 
+from .entity import XComfortEntity, add_entities_dynamically, device_items
+
 _LOGGER = logging.getLogger(__name__)
 
 async def async_setup_entry(hass, config_entry, async_add_entities):
     coordinator = config_entry.runtime_data
-    i = 0
-    for device in coordinator.data:
-        if device['type'].find("Switch") >= 0:
-            async_add_entities([xcSwitch(coordinator, i, device['id'], device['name'])])
-        i += 1
 
-class xcSwitch(SwitchEntity):
+    def build(device):
+        if device['type'].find("Switch") >= 0:
+            return [xcSwitch(coordinator, device['id'], device['id'], device['name'])]
+        return []
+
+    add_entities_dynamically(config_entry, coordinator, async_add_entities,
+                             device_items(coordinator), build)
+
+class xcSwitch(XComfortEntity, SwitchEntity):
 
     def __init__(self, coordinator, id, unique_name, name ):
         self.id = id
@@ -26,10 +31,6 @@ class xcSwitch(SwitchEntity):
     @property
     def name(self):
         return self._name
-
-    @property
-    def unique_id(self):
-        return self._unique_id
 
     @property
     def extra_state_attributes(self):
