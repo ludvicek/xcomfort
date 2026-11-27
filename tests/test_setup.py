@@ -131,7 +131,55 @@ def no_network(monkeypatch):
     async def connect(self):
         self.is_connected = True
 
+    async def get_statuses(self):
+        self.devices = list(DEVICES)
+        return True
+
     monkeypatch.setattr(integration.xcomfortAPI, "connect", connect)
+    monkeypatch.setattr(integration.xcomfortAPI, "get_statuses", get_statuses)
+
+
+# --- Controller not ready at setup ---------------------------------------------
+
+ConfigEntryNotReady = importlib.import_module("homeassistant.exceptions").ConfigEntryNotReady
+
+
+@pytest.mark.parametrize("devices", [
+    [{}],   # query() fallback: SHC unreachable, or a zone without devices
+    [],
+])
+def test_no_devices_at_setup_means_not_ready(no_network, monkeypatch, devices):
+    async def get_statuses(self):
+        self.devices = devices
+        return True
+
+    monkeypatch.setattr(integration.xcomfortAPI, "get_statuses", get_statuses)
+    hass = make_hass()
+    entry = make_config_entry("http://shc-a")
+
+    with pytest.raises(ConfigEntryNotReady):
+        asyncio.run(integration.async_setup_entry(hass, entry))
+    # The platforms must not be set up on missing data; they iterated None.
+    assert hass.config_entries.forwarded == []
+
+
+def test_unreachable_controller_at_connect_means_not_ready(monkeypatch):
+    async def connect(self):
+        raise integration.aiohttp.ClientConnectionError("unreachable")
+
+    monkeypatch.setattr(integration.xcomfortAPI, "connect", connect)
+    hass = make_hass()
+
+    with pytest.raises(ConfigEntryNotReady):
+        asyncio.run(integration.async_setup_entry(hass, make_config_entry("http://shc-a")))
+    assert hass.config_entries.forwarded == []
+
+
+def test_first_refresh_data_is_there_before_platforms(no_network):
+    hass = make_hass()
+    (entry,) = setup_entries(hass, "http://shc-a")
+    assert entry.runtime_data.data == DEVICES
+    assert hass.config_entries.forwarded == ["http://shc-a"]
 
 
 def setup_entries(hass, *urls):

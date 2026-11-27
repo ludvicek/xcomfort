@@ -30,7 +30,11 @@ class _ClientSession:
     pass
 
 
-class _ClientConnectionError(Exception):
+class _ClientError(Exception):
+    pass
+
+
+class _ClientConnectionError(_ClientError):
     pass
 
 
@@ -47,6 +51,7 @@ class _BinarySensorEntity:
 
 
 _ensure("aiohttp", ClientSession=_ClientSession,
+        ClientError=_ClientError,
         ClientConnectionError=_ClientConnectionError,
         BasicAuth=lambda **kwargs: None)
 _ensure("aiofiles")
@@ -90,16 +95,31 @@ class _CoordinatorEntity:
         self.coordinator = coordinator
 
 
+class _UpdateFailed(Exception):
+    pass
+
+
 class _DataUpdateCoordinator:
-    def __init__(self, hass, logger, name=None, update_interval=None, **kwargs):
+    def __init__(self, hass, logger, name=None, update_interval=None, config_entry=None,
+                 **kwargs):
         self.hass = hass
         self.name = name
         self.update_interval = update_interval
+        self.config_entry = config_entry
         self.data = None
         self.last_update_success = True
 
     async def async_refresh(self):
         pass
+
+    async def async_config_entry_first_refresh(self):
+        # Like Home Assistant: a failed first update means "not ready yet",
+        # so the entry is set up again later instead of failing for good.
+        try:
+            self.data = await self._async_update_data()
+        except _UpdateFailed as err:
+            self.last_update_success = False
+            raise sys.modules["homeassistant.exceptions"].ConfigEntryNotReady(str(err)) from err
 
 
 _ensure("homeassistant.core", callback=lambda func: func)
@@ -139,7 +159,7 @@ def registry_entry(entity_id, unique_id, config_entry_id, platform="xcomfort"):
 _ensure("homeassistant.helpers.update_coordinator",
         CoordinatorEntity=_CoordinatorEntity,
         DataUpdateCoordinator=_DataUpdateCoordinator,
-        UpdateFailed=type("UpdateFailed", (Exception,), {}))
+        UpdateFailed=_UpdateFailed)
 _ensure("homeassistant.components.switch", SwitchEntity=_Entity)
 _ensure("homeassistant.components.button", ButtonEntity=_Entity)
 _ensure("homeassistant.components.cover", CoverEntity=_Entity, CoverEntityFeature=_Names())

@@ -1,10 +1,12 @@
 ###Version 1.3.7
+import asyncio
 import logging
 
+import aiohttp
 from datetime import timedelta
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
-from homeassistant.exceptions import ConfigEntryAuthFailed
+from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from homeassistant.helpers import entity_registry as er
 
 #from xcomfortshc import xcomfortAPI
@@ -32,9 +34,20 @@ async def async_setup_entry(hass, config_entry):
 
     websession = async_get_clientsession(hass)
     coordinator = XCDataUpdateCoordinator(hass, websession, config_entry.data["url"],config_entry.data["zone"],
-        config_entry.data["username"], config_entry.data["password"], config_entry.data["scan_interval"])
-    await coordinator.xc.connect()
-    await coordinator.async_refresh()
+        config_entry.data["username"], config_entry.data["password"], config_entry.data["scan_interval"],
+        config_entry=config_entry)
+    # A controller that is down, e.g. still booting after a power cut, must
+    # not fail the entry for good: ConfigEntryNotReady makes Home Assistant
+    # retry the setup later.
+    try:
+        await coordinator.xc.connect()
+    except (aiohttp.ClientError, asyncio.TimeoutError) as err:
+        raise ConfigEntryNotReady(f"Cannot reach the xComfort SHC: {err}") from err
+    # The platforms build their entities from coordinator.data. async_refresh()
+    # swallowed a failed first update and left the data at None, and every
+    # platform then failed on it. The first refresh raises ConfigEntryNotReady
+    # instead, so the platforms are only set up once there is data.
+    await coordinator.async_config_entry_first_refresh()
     # Each entry keeps its own coordinator. Home Assistant sets up the entries of
     # one integration concurrently, so a single shared hass.data slot let one
     # entry's platforms pick up another controller's coordinator.
@@ -68,12 +81,13 @@ async def async_unload_entry(hass, config_entry):
     return await hass.config_entries.async_unload_platforms(config_entry, PLATFORMS)
 
 class XCDataUpdateCoordinator(DataUpdateCoordinator):
-    def __init__(self, hass, session, url, zone, username, password, scan_interval,  ):
+    def __init__(self, hass, session, url, zone, username, password, scan_interval, config_entry=None):
         stat_interval = 60 // scan_interval
         if stat_interval == 0:
             stat_interval = 1
         self.xc = xcomfortAPI(session, url, zone, username, password, stat_interval)
-        super().__init__(hass, _LOGGER, name=DOMAIN, update_interval=timedelta(seconds=scan_interval))
+        super().__init__(hass, _LOGGER, name=DOMAIN, config_entry=config_entry,
+                         update_interval=timedelta(seconds=scan_interval))
 
     async def _async_update_data(self):
         try:
@@ -87,5 +101,9 @@ class XCDataUpdateCoordinator(DataUpdateCoordinator):
         # Without this the coordinator reports success on a connection error and
         # every entity reads None while still claiming to be available.
         if not self.xc.devices or not self.xc.devices[0]:
-            raise UpdateFailed("Invalid sensors data")
+            # The same [{}] comes back for a zone that holds no devices, so the
+            # two cannot be told apart here; the message names both.
+            raise UpdateFailed(
+                f"No devices from the xComfort SHC in zone {self.xc.zone}: "
+                "the controller is unreachable or the zone is empty")
         return self.xc.devices
