@@ -13,6 +13,7 @@ from homeassistant.const import (
 from homeassistant.helpers.entity import EntityCategory
 import logging
 
+from .const import battery_summary_unique_id
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -68,7 +69,7 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
     for uid, device in coordinator.xc.get_battery_devices().items():
         async_add_entities([xcBattery(coordinator, uid, device['name'])])
     if coordinator.xc.get_battery_status():
-        async_add_entities([xcBatteryStatus(coordinator)])
+        async_add_entities([xcBatteryStatus(coordinator, battery_summary_unique_id(config_entry))])
 
 class xcTemperature(SensorEntity):
 
@@ -269,9 +270,9 @@ class xcBatteryStatus(SensorEntity):
 
     _attr_entity_category = EntityCategory.DIAGNOSTIC
 
-    def __init__(self, coordinator ):
+    def __init__(self, coordinator, unique_id):
         self._name = "xComfort batteries"
-        self._unique_id = "xcomfort_batteries"
+        self._unique_id = unique_id
         self.coordinator = coordinator
         _LOGGER.debug("xcBatteryStatus.init() %s", self._name)
 

@@ -109,6 +109,33 @@ _ensure("homeassistant.const", PERCENTAGE="%", ATTR_TEMPERATURE="temperature",
 _ensure("homeassistant.helpers")
 _ensure("homeassistant.helpers.entity", EntityCategory=_Names())
 _ensure("homeassistant.helpers.aiohttp_client", async_get_clientsession=lambda hass: None)
+_ensure("homeassistant.helpers.entity_registry", async_get=lambda hass: hass.entity_registry)
+
+
+class FakeEntityRegistry:
+    """The few entity registry calls the integration makes."""
+
+    def __init__(self, *entries):
+        self.entities = {entry.entity_id: entry for entry in entries}
+
+    def async_get_entity_id(self, domain, platform, unique_id):
+        for entry in self.entities.values():
+            if (entry.domain, entry.platform, entry.unique_id) == (domain, platform, unique_id):
+                return entry.entity_id
+        return None
+
+    def async_get(self, entity_id):
+        return self.entities.get(entity_id)
+
+    def async_update_entity(self, entity_id, new_unique_id=None, **kwargs):
+        if new_unique_id is not None:
+            self.entities[entity_id].unique_id = new_unique_id
+
+
+def registry_entry(entity_id, unique_id, config_entry_id, platform="xcomfort"):
+    return types.SimpleNamespace(entity_id=entity_id, domain=entity_id.split(".")[0],
+                                 platform=platform, unique_id=unique_id,
+                                 config_entry_id=config_entry_id)
 _ensure("homeassistant.helpers.update_coordinator",
         CoordinatorEntity=_CoordinatorEntity,
         DataUpdateCoordinator=_DataUpdateCoordinator,

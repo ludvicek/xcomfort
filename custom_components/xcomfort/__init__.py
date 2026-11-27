@@ -5,11 +5,12 @@ from datetime import timedelta
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.exceptions import ConfigEntryAuthFailed
+from homeassistant.helpers import entity_registry as er
 
 #from xcomfortshc import xcomfortAPI
 from .xcomfortAPI import xcomfortAPI
 
-from .const import DOMAIN
+from .const import DOMAIN, LEGACY_BATTERY_SUMMARY_ID, battery_summary_unique_id
 _LOGGER = logging.getLogger(__name__)
 
 PLATFORMS = ["sensor", "binary_sensor", "light", "switch", "button", "cover", "climate"]
@@ -39,8 +40,28 @@ async def async_setup_entry(hass, config_entry):
     # entry's platforms pick up another controller's coordinator.
     config_entry.runtime_data = coordinator
 
+    _migrate_battery_summary(hass, config_entry)
     await hass.config_entries.async_forward_entry_setups(config_entry, PLATFORMS)
     return True
+
+def _migrate_battery_summary(hass, config_entry):
+    """Move the entry's battery summary to its own unique id.
+
+    The summary used to share one unique id between all controllers. If this
+    entry owns the old registry entry, it is renamed in place, so the entity
+    keeps its entity_id, history and customisations. An entry owned by another
+    controller is left for that controller's own setup to migrate.
+    """
+    registry = er.async_get(hass)
+    entity_id = registry.async_get_entity_id("sensor", DOMAIN, LEGACY_BATTERY_SUMMARY_ID)
+    if entity_id is None:
+        return
+    entity = registry.async_get(entity_id)
+    if entity is None or entity.config_entry_id != config_entry.entry_id:
+        return
+    new_unique_id = battery_summary_unique_id(config_entry)
+    _LOGGER.debug("Migrating %s unique_id %s -> %s", entity_id, LEGACY_BATTERY_SUMMARY_ID, new_unique_id)
+    registry.async_update_entity(entity_id, new_unique_id=new_unique_id)
 
 async def async_unload_entry(hass, config_entry):
     """Unload the entry so it can be reloaded or removed without restarting HA."""

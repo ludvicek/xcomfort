@@ -10,6 +10,7 @@ import importlib
 import types
 
 import pytest
+from conftest import FakeEntityRegistry
 
 from xcomfort import binary_sensor, button, climate, cover, light, sensor, switch
 from xcomfort.const import DOMAIN
@@ -110,14 +111,16 @@ class FakeServices:
         return (domain, service) in self.registered
 
 
-def make_hass():
+def make_hass(entity_registry=None):
     return types.SimpleNamespace(data={}, config_entries=FakeConfigEntries(),
-                                 services=FakeServices())
+                                 services=FakeServices(),
+                                 entity_registry=entity_registry or FakeEntityRegistry())
 
 
 def make_config_entry(url):
     return types.SimpleNamespace(
         entry_id=url,
+        unique_id=url,
         data={"url": url, "zone": "hz_1", "username": "user", "password": "pw",
               "scan_interval": 5},
     )
