@@ -1,0 +1,31 @@
+name: Upgrade test
+
+# Runs the latest release against fake controllers, then the current code on
+# the registry it left behind, and checks that entity ids, names, areas,
+# states and the configured zone survive the update. See tests_upgrade/.
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  upgrade:
+    name: Upgrade from the latest release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install Home Assistant test harness
+        # aiofiles comes with the integration's requirement (xcomfortshc) in a real
+        # Home Assistant; the test harness does not install requirements.
+        run: pip install pytest-homeassistant-custom-component aiofiles
+      - name: Upgrade test
+        run: |
+          OLD_REF="$(git describe --tags --abbrev=0 HEAD)"
+          echo "Upgrading from $OLD_REF"
+          OLD_REF="$OLD_REF" bash tests_upgrade/run_upgrade_test.sh
