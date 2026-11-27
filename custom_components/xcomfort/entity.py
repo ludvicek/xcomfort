@@ -1,7 +1,17 @@
 """Pieces every xComfort entity shares: unique ids, devices and dynamic adding."""
 from .const import DOMAIN
 
+try:
+    from homeassistant.helpers.device_registry import DeviceInfo
+except ImportError:  # pragma: no cover - only without Home Assistant
+    DeviceInfo = None
+
 MANUFACTURER = "Eaton"
+
+# Newer Home Assistant links a device to its parent by the parent's registry id
+# (via_device_id) and deprecates the identifier tuple (via_device), which stops
+# working in 2027.8. Older releases reject the unknown key, so use what is there.
+VIA_DEVICE_ID = "via_device_id" in getattr(DeviceInfo, "__annotations__", {})
 
 
 def entry_key(config_entry):
@@ -38,13 +48,18 @@ def zone_device_info(config_entry, zone):
     """A zone of the controller, as a device under it; the controller without one."""
     if not zone:
         return hub_device_info(config_entry)
-    return {
+    info = {
         "identifiers": {(DOMAIN, f"{entry_key(config_entry)}_{zone['id']}")},
         "name": zone["name"],
         "manufacturer": MANUFACTURER,
         "model": "xComfort zone",
-        "via_device": hub_identifier(config_entry),
     }
+    hub_device_id = getattr(config_entry.runtime_data, "hub_device_id", None)
+    if VIA_DEVICE_ID and hub_device_id:
+        info["via_device_id"] = hub_device_id
+    else:
+        info["via_device"] = hub_identifier(config_entry)
+    return info
 
 
 class XComfortEntity:

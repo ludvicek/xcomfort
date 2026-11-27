@@ -221,6 +221,21 @@ def test_state_follows_the_device_id_not_its_list_position(make_api):
     assert lamp_a.is_on
 
 
+def test_zone_device_links_to_the_controller_by_registry_id_where_supported(
+        make_api, monkeypatch):
+    from xcomfort import entity as entity_module
+
+    api, _, coordinator, entry = loaded(make_api)
+    coordinator.hub_device_id = "hub-device-id"
+    monkeypatch.setattr(entity_module, "VIA_DEVICE_ID", True)
+    added = []
+    asyncio.run(light.async_setup_entry(None, entry, added.extend))
+
+    info = next(entity for entity in added if entity.name == "Lamp A").device_info
+    assert info["via_device_id"] == "hub-device-id"
+    assert "via_device" not in info
+
+
 def test_devices_appearing_later_are_added_once(make_api):
     api, shc, coordinator, entry = loaded(make_api)
     added = []

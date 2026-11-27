@@ -59,8 +59,9 @@ async def async_setup_entry(hass, config_entry):
     _migrate_unique_ids(hass, config_entry)
     # The controller is the parent device of its zones; it has to exist
     # before the zone devices name it as their via_device.
-    dr.async_get(hass).async_get_or_create(config_entry_id=config_entry.entry_id,
-                                           **hub_device_info(config_entry))
+    hub = dr.async_get(hass).async_get_or_create(config_entry_id=config_entry.entry_id,
+                                                 **hub_device_info(config_entry))
+    coordinator.hub_device_id = getattr(hub, "id", None)
     await hass.config_entries.async_forward_entry_setups(config_entry, PLATFORMS)
     return True
 
