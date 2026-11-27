@@ -62,6 +62,65 @@ _ensure("homeassistant.components.binary_sensor",
         BinarySensorEntity=_BinarySensorEntity,
         BinarySensorDeviceClass=types.SimpleNamespace(MOTION="motion"))
 
+
+class _Flag(str):
+    """A constant that also combines with | like the enum flags it stands in for."""
+
+    def __or__(self, other):
+        return self
+
+    __ror__ = __or__
+
+
+class _Names:
+    """Any attribute is a constant named after itself, e.g. HVACMode.HEAT."""
+
+    def __getattr__(self, name):
+        if name.startswith("__"):
+            raise AttributeError(name)
+        return _Flag(name)
+
+
+class _Entity:
+    pass
+
+
+class _CoordinatorEntity:
+    def __init__(self, coordinator, *args, **kwargs):
+        self.coordinator = coordinator
+
+
+class _DataUpdateCoordinator:
+    def __init__(self, hass, logger, name=None, update_interval=None, **kwargs):
+        self.hass = hass
+        self.name = name
+        self.update_interval = update_interval
+        self.data = None
+        self.last_update_success = True
+
+    async def async_refresh(self):
+        pass
+
+
+_ensure("homeassistant.core", callback=lambda func: func)
+_ensure("homeassistant.const", PERCENTAGE="%", ATTR_TEMPERATURE="temperature",
+        PRECISION_HALVES=0.5, UnitOfEnergy=_Names(), UnitOfPower=_Names(),
+        UnitOfTemperature=_Names())
+_ensure("homeassistant.helpers")
+_ensure("homeassistant.helpers.entity", EntityCategory=_Names())
+_ensure("homeassistant.helpers.aiohttp_client", async_get_clientsession=lambda hass: None)
+_ensure("homeassistant.helpers.update_coordinator",
+        CoordinatorEntity=_CoordinatorEntity,
+        DataUpdateCoordinator=_DataUpdateCoordinator,
+        UpdateFailed=type("UpdateFailed", (Exception,), {}))
+_ensure("homeassistant.components.switch", SwitchEntity=_Entity)
+_ensure("homeassistant.components.button", ButtonEntity=_Entity)
+_ensure("homeassistant.components.cover", CoverEntity=_Entity, CoverEntityFeature=_Names())
+_ensure("homeassistant.components.sensor", SensorEntity=_Entity,
+        SensorDeviceClass=_Names(), SensorStateClass=_Names())
+_ensure("homeassistant.components.climate", ClimateEntity=_Entity,
+        HVACMode=_Names(), ClimateEntityFeature=_Names())
+
 COMPONENT = REPO / "custom_components" / "xcomfort"
 
 # Register the package without running its __init__.py, which needs the full

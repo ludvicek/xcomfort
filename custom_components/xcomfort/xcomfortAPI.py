@@ -259,10 +259,10 @@ class xcomfortAPI:
         """Return True if data is available."""
         return bool(self.devices)
 
-    async def debug(self):
-        async with aiofiles.open("xcomfort_devices", "w") as file:
+    async def debug(self, suffix=""):
+        async with aiofiles.open("xcomfort_devices" + suffix, "w") as file:
             await file.write(json.dumps(self.devices, indent=4))
-        async with aiofiles.open("xcomfort_log_stats", "w") as file:
+        async with aiofiles.open("xcomfort_log_stats" + suffix, "w") as file:
             await file.write(json.dumps(self.log_stats, indent=4))
-        async with aiofiles.open("xcomfort_physical_devices", "w") as file:
+        async with aiofiles.open("xcomfort_physical_devices" + suffix, "w") as file:
             await file.write(json.dumps(self.physical_devices, indent=4))   

@@ -2,11 +2,10 @@
 from homeassistant.components.switch import SwitchEntity
 import logging
 
-from .const import DOMAIN
 _LOGGER = logging.getLogger(__name__)
 
 async def async_setup_entry(hass, config_entry, async_add_entities):
-    coordinator = hass.data[DOMAIN]
+    coordinator = config_entry.runtime_data
     i = 0
     for device in coordinator.data:
         if device['type'].find("Switch") >= 0:

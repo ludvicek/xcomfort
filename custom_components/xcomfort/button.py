@@ -2,11 +2,10 @@
 from homeassistant.components.button import ButtonEntity
 import logging
 
-from .const import DOMAIN
 _LOGGER = logging.getLogger(__name__)
 
 async def async_setup_entry(hass, config_entry, async_add_entities):
-    coordinator = hass.data[DOMAIN]
+    coordinator = config_entry.runtime_data
     i = 0
     for scene in coordinator.xc.scenes:
         async_add_entities([xcScene(coordinator, i, scene['id'], scene['name'])])

@@ -5,7 +5,6 @@ from homeassistant.components.binary_sensor import (
 )
 import logging
 
-from .const import DOMAIN
 _LOGGER = logging.getLogger(__name__)
 
 # The SHC reports these device types as plain strings in the "value" field.
@@ -16,7 +15,7 @@ OFF_STATES = ("OFF", "CLOSE", "CLOSED", "NO MOTION")
 
 
 async def async_setup_entry(hass, config_entry, async_add_entities):
-    coordinator = hass.data[DOMAIN]
+    coordinator = config_entry.runtime_data
     i = 0
     for device in coordinator.data:
         if device['type'].find("BinaryMotionSensor") >= 0:

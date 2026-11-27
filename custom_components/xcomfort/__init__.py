@@ -15,6 +15,16 @@ _LOGGER = logging.getLogger(__name__)
 PLATFORMS = ["sensor", "binary_sensor", "light", "switch", "button", "cover", "climate"]
 
 async def async_setup(hass, config):
+    async def async_save_status_files(service_call):
+        # One controller writes the plain file names, as before. With several,
+        # each gets its entry id appended so they do not overwrite each other.
+        entries = [entry for entry in hass.config_entries.async_entries(DOMAIN)
+                   if getattr(entry, "runtime_data", None) is not None]
+        for entry in entries:
+            suffix = "" if len(entries) == 1 else "_" + entry.entry_id
+            await entry.runtime_data.xc.debug(suffix)
+
+    hass.services.async_register(DOMAIN, "save_status_files", async_save_status_files)
     return True
 
 async def async_setup_entry(hass, config_entry):
@@ -24,24 +34,17 @@ async def async_setup_entry(hass, config_entry):
         config_entry.data["username"], config_entry.data["password"], config_entry.data["scan_interval"])
     await coordinator.xc.connect()
     await coordinator.async_refresh()
-    hass.data[DOMAIN] = coordinator
+    # Each entry keeps its own coordinator. Home Assistant sets up the entries of
+    # one integration concurrently, so a single shared hass.data slot let one
+    # entry's platforms pick up another controller's coordinator.
+    config_entry.runtime_data = coordinator
 
     await hass.config_entries.async_forward_entry_setups(config_entry, PLATFORMS)
-
-    async def async_service1(service_call):
-        await coordinator.xc.debug()
-
-    hass.services.async_register(DOMAIN,"save_status_files",async_service1,)
     return True
 
 async def async_unload_entry(hass, config_entry):
     """Unload the entry so it can be reloaded or removed without restarting HA."""
-    unloaded = await hass.config_entries.async_unload_platforms(config_entry, PLATFORMS)
-    if unloaded:
-        # The service closes over this entry's coordinator, so it goes with it.
-        hass.services.async_remove(DOMAIN, "save_status_files")
-        hass.data.pop(DOMAIN, None)
-    return unloaded
+    return await hass.config_entries.async_unload_platforms(config_entry, PLATFORMS)
 
 class XCDataUpdateCoordinator(DataUpdateCoordinator):
     def __init__(self, hass, session, url, zone, username, password, scan_interval,  ):

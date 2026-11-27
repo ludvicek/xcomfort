@@ -15,7 +15,6 @@ import logging
 
 
 _LOGGER = logging.getLogger(__name__)
-from .const import DOMAIN
 
 def clean(value):
     """Normalise a value the SHC reports.
@@ -44,7 +43,7 @@ SENSOR_TYPES = {
 }
 
 async def async_setup_entry(hass, config_entry, async_add_entities):
-    coordinator = hass.data[DOMAIN]
+    coordinator = config_entry.runtime_data
     i = 0
     for device in coordinator.data:
         if device['type'].find("Temp") >= 0:

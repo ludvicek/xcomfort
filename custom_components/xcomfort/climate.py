@@ -13,11 +13,10 @@ from homeassistant.const import (
 )
 
 
-from .const import DOMAIN
 _LOGGER = logging.getLogger(__name__)
 
 async def async_setup_entry(hass, config_entry, async_add_entities):
-    coordinator = hass.data[DOMAIN]
+    coordinator = config_entry.runtime_data
     await coordinator.xc.get_zones()
     try:
         if config_entry.data["heating_zone0"]!='':
