@@ -3,6 +3,8 @@
 If homeassistant or aiohttp are installed, the real modules are used. If not,
 the few names the tests touch are stubbed, so the suite runs with plain pytest.
 """
+import copy
+import datetime
 import importlib
 import sys
 import types
@@ -133,6 +135,29 @@ _ensure("homeassistant.helpers.entity_registry", async_get=lambda hass: hass.ent
         async_entries_for_config_entry=lambda registry, entry_id: [
             entry for entry in registry.entities.values() if entry.config_entry_id == entry_id])
 _ensure("homeassistant.helpers.device_registry", async_get=lambda hass: hass.device_registry)
+
+
+class FakeStore:
+    """Home Assistant's Store, in memory. STORED[key] is what was saved."""
+
+    STORED = {}
+
+    def __init__(self, hass, version, key):
+        self.key = key
+
+    async def async_load(self):
+        return copy.deepcopy(FakeStore.STORED.get(self.key))
+
+    async def async_save(self, data):
+        FakeStore.STORED[self.key] = copy.deepcopy(data)
+
+
+_ensure("homeassistant.helpers.storage", Store=FakeStore)
+_ensure("homeassistant.util")
+_ensure("homeassistant.util.dt", utcnow=lambda: datetime.datetime(2026, 11, 27, 12, 0,
+                                                                  tzinfo=datetime.timezone.utc))
+if "homeassistant.util" in sys.modules and not hasattr(sys.modules["homeassistant.util"], "dt"):
+    sys.modules["homeassistant.util"].dt = sys.modules["homeassistant.util.dt"]
 
 
 def fake_entry(entry_id="entry-a", unique_id="http://shc-a", runtime_data=None, title="SHC",

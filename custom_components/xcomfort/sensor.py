@@ -13,6 +13,7 @@ from homeassistant.const import (
 from homeassistant.helpers.entity import EntityCategory
 import logging
 
+from .automations import fingerprint
 from .const import battery_summary_unique_id
 from .entity import XComfortEntity, add_entities_dynamically, device_items
 
@@ -84,6 +85,60 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
     if coordinator.xc.get_battery_status():
         async_add_entities([xcBatteryStatus(coordinator, battery_summary_unique_id(config_entry))
                             .bind(config_entry, unique_id=battery_summary_unique_id(config_entry))])
+
+    automations = getattr(coordinator, "automations", None)
+    if automations is not None:
+        async_add_entities([xcAutomations(automations).bind(config_entry)])
+
+
+class xcAutomations(XComfortEntity, SensorEntity):
+    """The controller's automations at a glance: the number of macros.
+
+    The fingerprint attribute changes with any change to a macro, a scene's
+    actions or the planner; last_change says what changed and when.
+    """
+
+    _attr_icon = "mdi:robot-outline"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+
+    def __init__(self, automations):
+        self.automations = automations
+        self._unique_id = "automations"
+        self._name = "Automations"
+
+    @property
+    def name(self):
+        return self._name
+
+    @property
+    def should_poll(self):
+        return False
+
+    @property
+    def available(self):
+        return self.automations.last_update_success and self.automations.data is not None
+
+    @property
+    def native_value(self):
+        return len((self.automations.data or {}).get("macros") or {})
+
+    @property
+    def extra_state_attributes(self):
+        data = self.automations.data or {}
+        macros = data.get("macros") or {}
+        last = self.automations.last_change or {}
+        return {
+            "macros_enabled": sum(1 for macro in macros.values() if macro["enabled"]),
+            "scenes": len(data.get("scenes") or {}),
+            "planner_entries": sum(len(value or []) for value in (data.get("planner") or {}).values()),
+            "fingerprint": fingerprint(data)[:12] if data else None,
+            "last_change": last.get("time"),
+            "last_change_summary": last.get("summary") or [],
+        }
+
+    async def async_added_to_hass(self):
+        self.async_on_remove(self.automations.async_add_listener(self.async_write_ha_state))
+
 
 class xcTemperature(XComfortEntity, SensorEntity):
 

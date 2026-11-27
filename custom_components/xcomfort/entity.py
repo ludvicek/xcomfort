@@ -74,6 +74,7 @@ class XComfortEntity:
     _xc_device_info = None
 
     def bind(self, config_entry, zone=None, raw_id=None, unique_id=None):
+        self._xc_entry = config_entry
         self._xc_unique_id = unique_id or entity_unique_id(
             config_entry, raw_id or self._unique_id)
         self._xc_device_info = zone_device_info(config_entry, zone)
@@ -86,6 +87,33 @@ class XComfortEntity:
     @property
     def device_info(self):
         return self._xc_device_info
+
+
+ENTITY_DOMAINS = ("light", "switch", "cover", "sensor", "binary_sensor", "climate", "button")
+
+
+def entity_resolver(hass, config_entry):
+    """A function mapping an SHC device id to the Home Assistant entity_id.
+
+    It returns None for a device Home Assistant has no entity for, e.g. one of
+    a type the integration does not support.
+    """
+    if hass is None:
+        return lambda raw_id: None
+    from homeassistant.helpers import entity_registry as er
+    registry = er.async_get(hass)
+
+    def resolve(raw_id):
+        if not raw_id:
+            return None
+        unique_id = entity_unique_id(config_entry, raw_id)
+        for domain in ENTITY_DOMAINS:
+            entity_id = registry.async_get_entity_id(domain, DOMAIN, unique_id)
+            if entity_id:
+                return entity_id
+        return None
+
+    return resolve
 
 
 def add_entities_dynamically(config_entry, coordinator, async_add_entities, items, build):

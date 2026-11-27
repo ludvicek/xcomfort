@@ -2,7 +2,8 @@
 from homeassistant.components.button import ButtonEntity
 import logging
 
-from .entity import XComfortEntity, add_entities_dynamically
+from .automations import describe_operation
+from .entity import XComfortEntity, add_entities_dynamically, entity_resolver
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -34,6 +35,21 @@ class xcScene(XComfortEntity, ButtonEntity):
     @property
     def name(self):
         return self._name
+
+    @property
+    def extra_state_attributes(self):
+        """What the scene does, read from the controller with the automations."""
+        automations = getattr(self.coordinator, "automations", None)
+        scene = (((automations.data if automations else None) or {}).get("scenes") or {}).get(self._unique_id)
+        if scene is None:
+            return {}
+        resolve = entity_resolver(getattr(self, "hass", None), getattr(self, "_xc_entry", None))
+        return {"actions": [describe_operation(o, resolve) for o in scene["operations"]]}
+
+    async def async_added_to_hass(self):
+        automations = getattr(self.coordinator, "automations", None)
+        if automations is not None:
+            self.async_on_remove(automations.async_add_listener(self.async_write_ha_state))
 
     async def async_press(self) -> None:
         _LOGGER.debug("Scene %s activation called", self.name)

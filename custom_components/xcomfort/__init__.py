@@ -13,6 +13,11 @@ from homeassistant.helpers import entity_registry as er
 #from xcomfortshc import xcomfortAPI
 from .xcomfortAPI import xcomfortAPI
 
+from homeassistant.helpers.storage import Store
+from homeassistant.util import dt as dt_util
+
+from .automations import (AUTOMATION_REFRESH_MINUTES, EVENT_AUTOMATIONS_CHANGED, diff,
+                          fingerprint, normalize, summarize)
 from .const import DOMAIN, LEGACY_BATTERY_SUMMARY_ID, battery_summary_unique_id
 from .entity import entry_key, hub_device_info
 _LOGGER = logging.getLogger(__name__)
@@ -62,6 +67,10 @@ async def async_setup_entry(hass, config_entry):
     hub = dr.async_get(hass).async_get_or_create(config_entry_id=config_entry.entry_id,
                                                  **hub_device_info(config_entry))
     coordinator.hub_device_id = getattr(hub, "id", None)
+    # Macros, scene actions and the planner are read separately and rarely.
+    # A failed read must not hold up the devices, so it does not fail setup.
+    coordinator.automations = XCAutomationsCoordinator(hass, config_entry, coordinator.xc)
+    await coordinator.automations.async_refresh()
     await hass.config_entries.async_forward_entry_setups(config_entry, PLATFORMS)
     return True
 
@@ -136,3 +145,56 @@ class XCDataUpdateCoordinator(DataUpdateCoordinator):
                 f"No devices from the xComfort SHC in zone {self.xc.zone}: "
                 "the controller is unreachable or the zone is empty")
         return self.xc.devices
+
+class XCAutomationsCoordinator(DataUpdateCoordinator):
+    """Reads the controller's macros, scene actions and planner every 15 minutes.
+
+    The last snapshot is kept in Home Assistant's storage, so a change made
+    while Home Assistant was not running is still reported after a restart.
+    The very first read is the baseline and reports nothing. Changes are fired
+    as an EVENT_AUTOMATIONS_CHANGED event; a failed or partial read reports
+    nothing and keeps the last snapshot.
+    """
+
+    def __init__(self, hass, config_entry, xc):
+        super().__init__(hass, _LOGGER, name=f"{DOMAIN} automations", config_entry=config_entry,
+                         update_interval=timedelta(minutes=AUTOMATION_REFRESH_MINUTES))
+        self.xc = xc
+        self.store = Store(hass, 1, f"{DOMAIN}.automations.{config_entry.entry_id}")
+        self.last_change = None
+        self._previous = None
+        self._loaded = False
+
+    async def _async_update_data(self):
+        if not self._loaded:
+            stored = await self.store.async_load() or {}
+            self._previous = stored.get("snapshot")
+            self.last_change = stored.get("last_change")
+            self._loaded = True
+        try:
+            raw = await self.xc.refresh_automations()
+        except ConfigEntryAuthFailed:
+            raise
+        except Exception as err:
+            raise UpdateFailed(f"Error reading automations from the xComfort SHC: {err}") from err
+        if raw is None:
+            raise UpdateFailed("Could not read the automations from the xComfort SHC")
+        snapshot = normalize(raw)
+        changed = self._previous is None or fingerprint(self._previous) != fingerprint(snapshot)
+        if self._previous is not None and changed:
+            changes = diff(self._previous, snapshot)
+            if changes:
+                self.last_change = {"time": dt_util.utcnow().isoformat(), "changes": changes,
+                                    "summary": summarize(changes)}
+                _LOGGER.info("xComfort automations changed on %s: %s",
+                             self.config_entry.title, "; ".join(self.last_change["summary"]))
+                self.hass.bus.async_fire(EVENT_AUTOMATIONS_CHANGED, {
+                    "entry_id": self.config_entry.entry_id,
+                    "controller": self.config_entry.title,
+                    "changes": changes,
+                    "summary": self.last_change["summary"],
+                })
+        if changed:
+            await self.store.async_save({"snapshot": snapshot, "last_change": self.last_change})
+        self._previous = snapshot
+        return snapshot

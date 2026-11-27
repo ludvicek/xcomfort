@@ -126,6 +126,28 @@ class xcomfortAPI:
                     _LOGGER.debug('xcomfortAPI.connect() New sessionID = %s', self.sessionID)
 
     async def query(self, method, params=['', '']):
+        """The call's result, or [{}] when the SHC sent none (see _valid)."""
+        response = await self._rpc(method, params)
+        if response is None or 'result' not in response:
+            return [{}]
+        return response['result']
+
+    async def query_result(self, method, params):
+        """The call's result as sent, or None when the SHC sent no result.
+
+        Unlike query(), an empty list stays an empty list, so "nothing there"
+        and "could not read" can be told apart.
+        """
+        response = await self._rpc(method, params)
+        if response is None or 'error' in response:
+            return None
+        return response.get('result', [])
+
+    async def _rpc(self, method, params):
+        """Send one JSON-RPC call; reconnect and retry once on an RPC error.
+
+        Returns the decoded response, or None when the SHC cannot be reached.
+        """
         #_LOGGER.debug("query(%s)",method)
         rpc_headers = {
             'Cookie':self.sessionID,
@@ -146,7 +168,7 @@ class xcomfortAPI:
                 response = await resp.json()
         except aiohttp.ClientConnectionError:
             _LOGGER.error('query() client connection error')
-            return [{}]
+            return None
 
         if 'error' in response:
             _LOGGER.error("query() error, calling connect()")
@@ -164,9 +186,7 @@ class xcomfortAPI:
             except aiohttp.ClientConnectionError:
                 _LOGGER.error('query() client connection error after connect()')
 
-        if 'result' not in response:
-            response['result'] = [{}]
-        return response['result']
+        return response
 
     def add_heating_zone(self, zone):
         self.heating_zones.append(zone)
@@ -219,6 +239,56 @@ class xcomfortAPI:
         _LOGGER.debug("refresh_zones() %d zones, %d devices, %d scenes, polling %s",
                       len(zones), len(devices), len(scenes), self.poll_zones)
         return True
+
+    async def refresh_automations(self):
+        """Read the macros with their parts, the scenes' actions and the planner.
+
+        Read only. Returns None when any call could not be read, so a partial
+        picture is never taken for the controller's real configuration.
+        """
+        from .automations import PLANNER_CALLS
+
+        if self.zone == ALL_ZONES:
+            zone_ids = [zone['zoneId'] for zone in self.zones_list] or list(self.zones)
+        else:
+            zone_ids = [self.zone]
+        names = {zone['zoneId']: zone.get('zoneName') or zone['zoneId'] for zone in self.zones_list}
+
+        macros = {}
+        for zone_id in zone_ids:
+            listed = await self.query_result('MacroFunction/getMacros', [zone_id, ''])
+            if listed is None:
+                return None
+            for macro in _valid(listed, 'id'):
+                if macro['id'] in macros:
+                    continue
+                parts = {}
+                for key, method in (('triggers', 'MacroFunction/getTrigs'),
+                                    ('conditions', 'MacroFunction/getConds'),
+                                    ('operations', 'MacroFunction/getOps')):
+                    got = await self.query_result(method, [zone_id, macro['id']])
+                    if got is None:
+                        return None
+                    parts[key] = got if isinstance(got, list) else []
+                macros[macro['id']] = {**macro, 'zone': zone_id, **parts}
+                # A zone with macros only is not among the device zones; the
+                # macro's entity still belongs under a device named after it.
+                self.zones.setdefault(zone_id, {'id': zone_id, 'name': names.get(zone_id, zone_id)})
+
+        scenes = {}
+        for scene_id, scene in self.scenes.items():
+            got = await self.query_result('SceneFunction/getOps', [scene['zone'], scene_id])
+            if got is None:
+                return None
+            scenes[scene_id] = {**scene, 'operations': got if isinstance(got, list) else []}
+
+        planner = {}
+        for key, method, params in PLANNER_CALLS:
+            got = await self.query_result(method, params)
+            if got is None:
+                return None
+            planner[key] = got
+        return {'macros': macros, 'scenes': scenes, 'planner': planner}
 
     async def poll_devices(self):
         """Update the known devices' values. False if any polled zone fails."""
