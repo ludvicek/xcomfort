@@ -53,6 +53,12 @@ def test_humidity_switch_reports_start_as_on(value, expected):
     assert humidity.is_on is expected
 
 
+def test_humidity_switch_is_not_also_a_numeric_humidity_sensor():
+    _, added = entities_for(sensor, {"id": "xCo:7274403_u0", "name": "Sauna humidity",
+                                     "type": "BinaryHumiditySensor", "value": " STOP "})
+    assert added == []
+
+
 def test_motion_sensor_still_reads_no_motion_as_off():
     _, added = entities_for(binary_sensor, {"id": "xCo:1_u0", "name": "Hall",
                                             "type": "BinaryMotionSensor", "value": "NO MOTION"})

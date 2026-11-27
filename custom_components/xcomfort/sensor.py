@@ -50,6 +50,11 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
     coordinator = config_entry.runtime_data
 
     def build(device):
+        # Binary types belong to the binary_sensor platform. The substring
+        # tests below would otherwise also pick up e.g. BinaryHumiditySensor as
+        # a humidity reading, an entity that could only ever read "unknown".
+        if device['type'].startswith("Binary"):
+            return []
         if device['type'].find("Temp") >= 0:
             # The channel suffix is kept. A room thermostat exposes both a
             # TemperatureSensor "(temperature)" and a WheelSensor "(adjustment)"
