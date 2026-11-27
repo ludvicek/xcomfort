@@ -7,8 +7,13 @@ _LOGGER = logging.getLogger(__name__)
 async def async_setup_entry(hass, config_entry, async_add_entities):
     coordinator = config_entry.runtime_data
     i = 0
-    for scene in coordinator.xc.scenes:
-        async_add_entities([xcScene(coordinator, i, scene['id'], scene['name'])])
+    # query() returns [{}] when the SHC sends no result, e.g. for a zone without
+    # scenes. Such entries carry no id and used to raise KeyError, which failed
+    # the whole button platform and with it the entry's setup.
+    for scene in coordinator.xc.scenes or []:
+        if not isinstance(scene, dict) or not scene.get('id'):
+            continue
+        async_add_entities([xcScene(coordinator, i, scene['id'], scene.get('name') or scene['id'])])
         i += 1
 
 class xcScene(ButtonEntity):
