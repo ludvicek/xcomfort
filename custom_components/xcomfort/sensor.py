@@ -42,6 +42,8 @@ SENSOR_TYPES = {
     "EnergyConsumptionMeter": (SensorDeviceClass.ENERGY, SensorStateClass.TOTAL_INCREASING, UnitOfEnergy.KILO_WATT_HOUR, None, None),
     "PowerConsumptionMeter": (SensorDeviceClass.POWER, SensorStateClass.MEASUREMENT, UnitOfPower.WATT, None, None),
     "WheelSensor": (None, SensorStateClass.MEASUREMENT, UnitOfTemperature.CELSIUS, "mdi:knob", 1),
+    # ValveSensor is how far a heating valve (radiator head) is open, in percent.
+    "ValveSensor": (None, SensorStateClass.MEASUREMENT, PERCENTAGE, "mdi:valve", 0),
 }
 
 async def async_setup_entry(hass, config_entry, async_add_entities):

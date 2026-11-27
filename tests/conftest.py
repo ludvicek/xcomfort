@@ -65,7 +65,7 @@ _ensure("homeassistant.components.light", ATTR_BRIGHTNESS="brightness",
         ColorMode=types.SimpleNamespace(BRIGHTNESS="brightness", ONOFF="onoff"))
 _ensure("homeassistant.components.binary_sensor",
         BinarySensorEntity=_BinarySensorEntity,
-        BinarySensorDeviceClass=types.SimpleNamespace(MOTION="motion"))
+        BinarySensorDeviceClass=types.SimpleNamespace(MOTION="motion", DOOR="door"))
 
 
 class _Flag(str):

@@ -12,8 +12,10 @@ _LOGGER = logging.getLogger(__name__)
 # The SHC reports these device types as plain strings in the "value" field.
 # They are compared exactly rather than with find(), because "NO MOTION"
 # contains "MOTION" and a substring test would invert the motion sensors.
-ON_STATES = ("ON", "OPEN", "MOTION")
-OFF_STATES = ("OFF", "CLOSE", "CLOSED", "NO MOTION")
+# START/STOP come from a humidity switch, which starts e.g. a fan above its
+# threshold and stops it below.
+ON_STATES = ("ON", "OPEN", "MOTION", "START")
+OFF_STATES = ("OFF", "CLOSE", "CLOSED", "NO MOTION", "STOP")
 
 
 async def async_setup_entry(hass, config_entry, async_add_entities):
@@ -23,6 +25,15 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
         if device['type'].find("BinaryMotionSensor") >= 0:
             return [xcBinarySensor(coordinator, device['id'], device['id'], device['name'],
                                    BinarySensorDeviceClass.MOTION)]
+        if device['type'].find("BinaryDoorSensor") >= 0:
+            return [xcBinarySensor(coordinator, device['id'], device['id'], device['name'],
+                                   BinarySensorDeviceClass.DOOR)]
+        if device['type'].find("BinaryHumiditySensor") >= 0:
+            # Whether the humidity is above the switch's threshold. That is not
+            # "wet" (moisture), so it gets no device class.
+            entity = xcBinarySensor(coordinator, device['id'], device['id'], device['name'], None)
+            entity._attr_icon = "mdi:water-percent"
+            return [entity]
         if device['type'].find("BinaryInput") >= 0:
             # A binary input can be wired to a door contact, a window contact or
             # anything else, and the SHC does not say which, so it gets no device
